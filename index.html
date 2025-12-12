@@ -16,10 +16,16 @@
     video, canvas{width:100%;height:auto;border-radius:10px}
     .small{font-size:12px;color:#9fb5d9}
     label{display:flex;gap:8px;align-items:center;margin:6px 0;color:#cfe6ff;font-size:13px}
-    input[type=number]{background:#0b1220;border:1px solid #20314a;padding:8px;border-radius:6px;color:#e6eef8;width:100%}
+    input[type=number], select{
+      background:#0b1220;border:1px solid #20314a;padding:8px;border-radius:6px;color:#e6eef8;width:100%
+    }
     .row{display:flex;gap:8px}
     .row > *{flex:1}
     .status{padding:8px;border-radius:8px;background:rgba(148,163,184,0.12);border:1px solid rgba(148,163,184,0.25)}
+    .statusLine{display:flex;justify-content:space-between;gap:10px}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:rgba(37,99,235,0.15);border:1px solid rgba(37,99,235,0.35);color:#bfdbfe}
+    .pill.warn{background:rgba(234,179,8,0.12);border:1px solid rgba(234,179,8,0.35);color:#fde68a}
+    .pill.bad{background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);color:#fecaca}
     table{width:100%;border-collapse:collapse;color:#cfe6ff;margin-top:10px}
     th,td{padding:6px;border-bottom:1px solid rgba(255,255,255,0.06);text-align:left;font-size:12px}
     tr.focused{background:rgba(37,99,235,0.18)}
@@ -32,15 +38,35 @@
   <div class="app">
     <div class="panel" style="height:calc(100vh - 32px);overflow:auto">
       <h2 style="margin:0 0 8px 0;">Jun Wei Biodynamic Lab</h2>
+
       <div class="status">
-        <div class="small"><b>Status:</b> <span id="statusText">Idle</span></div>
-        <div class="small"><b>FPS (loop):</b> <span id="fpsText">--</span></div>
-        <div class="small"><b>Recording samples:</b> <span id="sampleCount">0</span></div>
+        <div class="statusLine small">
+          <div><b>Status:</b> <span id="statusText">Idle</span></div>
+          <div class="pill" id="securePill" style="display:none;">HTTPS OK</div>
+        </div>
+        <div class="statusLine small" style="margin-top:6px;">
+          <div><b>Requested FPS:</b> <span id="reqFpsText">120</span></div>
+          <div><b>Actual FPS:</b> <span id="actFpsText">--</span></div>
+        </div>
+        <div class="statusLine small" style="margin-top:6px;">
+          <div><b>Loop FPS:</b> <span id="loopFpsText">--</span></div>
+          <div><b>Samples:</b> <span id="sampleCount">0</span></div>
+        </div>
+        <div class="small" id="fpsNote" style="margin-top:6px;color:#9fb5d9;"></div>
       </div>
 
       <h3 style="margin:14px 0 6px 0;">Camera</h3>
-      <button id="startCam">Start camera (back preferred)</button>
+
+      <div class="small">Request camera FPS</div>
+      <select id="fpsRequest">
+        <option value="120" selected>120 fps (request)</option>
+        <option value="60">60 fps (request)</option>
+        <option value="30">30 fps (request)</option>
+      </select>
+
+      <button id="startCam">Start camera</button>
       <button id="stopCam" class="secondary">Stop camera</button>
+
       <button id="exportPNG" class="secondary">Export PNG snapshot (video + overlay)</button>
 
       <h3 style="margin:14px 0 6px 0;">Recording</h3>
@@ -65,27 +91,27 @@
 
       <label style="margin-top:10px;">
         <input type="checkbox" id="teachingMode" />
-        Teaching mode (extra notes + force labels)
+        Teaching mode (labels mg / R / τ)
       </label>
 
       <div class="hint">
-        Tip: Click a row in the table to set the “focus joint” (FBD emphasis + interpretation).<br/>
-        If your camera doesn’t start: open this page via <b>https</b> or <b>localhost</b>.
+        • Tap a table row to set the “focus joint” (highlight + interpretation).<br/>
+        • iPhone Safari may negotiate FPS down (we show actual).<br/>
+        • Must be opened in Safari (not an in-app browser).
       </div>
     </div>
 
     <div class="panel">
       <div id="videoWrap">
-        <video id="video" playsinline muted></video>
+        <!-- iOS Safari: playsinline + muted + autoplay are important -->
+        <video id="video" playsinline muted autoplay></video>
         <canvas id="overlay"></canvas>
       </div>
 
       <h3 style="margin:12px 0 6px 0;">Live joint table</h3>
       <table>
         <thead>
-          <tr>
-            <th>Joint</th><th>Angle (°)</th><th>Vel (°/s)</th><th>τ (Nm)</th>
-          </tr>
+          <tr><th>Joint</th><th>Angle (°)</th><th>Vel (°/s)</th><th>τ (Nm)</th></tr>
         </thead>
         <tbody id="kinBody"></tbody>
       </table>
@@ -95,8 +121,6 @@
   </div>
 
   <script type="module">
-    import { FilesetResolver, PoseLandmarker } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0';
-
     // ---------- UI refs ----------
     const video = document.getElementById('video');
     const overlay = document.getElementById('overlay');
@@ -104,15 +128,21 @@
 
     const startCamBtn = document.getElementById('startCam');
     const stopCamBtn  = document.getElementById('stopCam');
-    const exportPNGBtn = document.getElementById('exportPNG');
+    const exportPNGBtn= document.getElementById('exportPNG');
 
     const startRecBtn = document.getElementById('startRec');
     const stopRecBtn  = document.getElementById('stopRec');
     const downloadBtn = document.getElementById('downloadCSV');
 
     const statusText  = document.getElementById('statusText');
-    const fpsText     = document.getElementById('fpsText');
+    const reqFpsText  = document.getElementById('reqFpsText');
+    const actFpsText  = document.getElementById('actFpsText');
+    const loopFpsText = document.getElementById('loopFpsText');
     const sampleCount = document.getElementById('sampleCount');
+    const fpsNote     = document.getElementById('fpsNote');
+
+    const fpsRequest  = document.getElementById('fpsRequest');
+    const securePill  = document.getElementById('securePill');
 
     const subjectMassInput   = document.getElementById('subjectMass');
     const subjectHeightInput = document.getElementById('subjectHeight');
@@ -125,8 +155,13 @@
     const kinBody = document.getElementById('kinBody');
     const interpText = document.getElementById('interpText');
 
+    // secure context indicator (GitHub Pages is HTTPS)
+    if (window.isSecureContext) {
+      securePill.style.display = 'inline-block';
+      securePill.textContent = 'HTTPS OK';
+    }
+
     // ---------- State ----------
-    let poseLandmarker = null;
     let stream = null;
     let loopRunning = false;
     let recording = false;
@@ -136,13 +171,12 @@
     let lastTime = null;
 
     let focusJoint = 'Torso';
-    let frameCounter = 0;
 
-    // FPS display
+    // loop FPS
     let fpsLastT = performance.now();
     let fpsFrames = 0;
 
-    // ---------- Joint naming / selection ----------
+    // ---------- Joints ----------
     const JOINTS = [
       'Torso',
       'L_Shoulder','R_Shoulder',
@@ -170,14 +204,18 @@
       return [...jointGrid.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);
     }
 
-    // ---------- Anthropometrics ----------
+    // ---------- Anthropometrics (mass/height derived) ----------
     let anthro = {
       subjectMass: 70,
       subjectHeight: 1.75,
       upperArmL: 0.188 * 1.75,
       forearmL: 0.146 * 1.75,
       upperArmM: 0.028 * 70,
-      forearmM: 0.016 * 70
+      forearmM: 0.016 * 70,
+      upperArmCOM: 0.188 * 1.75 * 0.436,
+      forearmCOM: 0.146 * 1.75 * 0.430,
+      upperArmI: 0,
+      forearmI: 0
     };
 
     function applyAnthro(){
@@ -194,6 +232,7 @@
 
       anthro.upperArmCOM = anthro.upperArmL * 0.436;
       anthro.forearmCOM = anthro.forearmL * 0.430;
+
       anthro.upperArmI = (anthro.upperArmM * (anthro.upperArmL**2)) * 0.05;
       anthro.forearmI = (anthro.forearmM * (anthro.forearmL**2)) * 0.04;
 
@@ -210,9 +249,9 @@
     resetAnthroBtn.addEventListener('click', resetAnthro);
     resetAnthro();
 
-    // ---------- OneEuro filter (internal only) ----------
+    // ---------- OneEuro filter (internal, UI removed) ----------
     class OneEuroFilter {
-      constructor(freq=150, minCutoff=1.0, beta=0.007, dcutoff=1.0){
+      constructor(freq=120, minCutoff=1.0, beta=0.007, dcutoff=1.0){
         this.freq=freq; this.minCutoff=minCutoff; this.beta=beta; this.dcutoff=dcutoff;
         this.xPrev=null; this.dxPrev=0; this.lastTime=null;
       }
@@ -241,93 +280,162 @@
     }
     const filters = {};
     function getFilter(key){
-      if(!filters[key]) filters[key] = new OneEuroFilter(150, 1.0, 0.007, 1.0);
+      if(!filters[key]) filters[key] = new OneEuroFilter(120, 1.0, 0.007, 1.0);
       return filters[key];
     }
 
-    // ---------- Mediapipe setup ----------
-    async function initPose(){
-      const vision = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm'
-      );
-      poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task'
-        },
-        runningMode: 'VIDEO',
-        numPoses: 1
-      });
-      setStatus('Pose model ready');
-    }
-    await initPose();
+    // ---------- MediaPipe Pose ----------
+    let poseLandmarker = null;
 
-    // ---------- Camera ----------
-    async function getBackCameraStream(){
-      const preferred = {
-        video: {
-          facingMode: { exact: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 150, max: 150 }
-        },
-        audio: false
-      };
+    async function initPoseModel(){
       try{
-        return await navigator.mediaDevices.getUserMedia(preferred);
-      }catch(e){
-        return await navigator.mediaDevices.getUserMedia({
-          video: { width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:60, max:120} },
-          audio:false
+        const { FilesetResolver, PoseLandmarker } =
+          await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0');
+
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm'
+        );
+
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task'
+          },
+          runningMode: 'VIDEO',
+          numPoses: 1
         });
+
+        setStatus('Pose model ready');
+      }catch(err){
+        console.error(err);
+        poseLandmarker = null;
+        setStatus('Pose model failed to load (camera can still run)');
       }
     }
+    await initPoseModel();
 
+    // ---------- Camera (120fps request + fallback + negotiated display) ----------
     function resizeCanvasToVideo(){
-      const w = video.videoWidth || overlay.clientWidth;
-      const h = video.videoHeight || overlay.clientHeight;
+      const w = video.videoWidth || overlay.clientWidth || 1280;
+      const h = video.videoHeight || overlay.clientHeight || 720;
       overlay.width = w;
       overlay.height = h;
     }
 
-    startCamBtn.addEventListener('click', async ()=>{
-      try{
-        setStatus('Starting camera...');
-        stream = await getBackCameraStream();
-        video.srcObject = stream;
+    async function tryGetUserMedia(constraints){
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    }
 
-        await video.play();
+    async function getCameraStreamRequestFPS(requestedFps){
+      const fps = Number(requestedFps) || 120;
 
-        if(video.readyState >= 1) resizeCanvasToVideo();
-        video.onloadedmetadata = () => resizeCanvasToVideo();
+      // iPhone Safari: keep constraints simple, avoid facingMode exact
+      const cRequested = {
+        video: {
+          facingMode: "environment",
+          width:  { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: fps, max: fps }
+        },
+        audio: false
+      };
 
-        if(!loopRunning){
-          loopRunning = true;
-          lastTime = performance.now();
-          runLoop();
+      // fallback chain
+      const c60 = {
+        video: {
+          facingMode: "environment",
+          width:{ideal:1280}, height:{ideal:720},
+          frameRate:{ideal:60, max:60}
+        },
+        audio:false
+      };
+
+      const cAny = { video: true, audio: false };
+
+      try { return await tryGetUserMedia(cRequested); }
+      catch (e1){
+        console.warn('Requested FPS constraints failed:', e1?.name, e1?.message);
+        try { return await tryGetUserMedia(c60); }
+        catch (e2){
+          console.warn('60 FPS constraints failed:', e2?.name, e2?.message);
+          return await tryGetUserMedia(cAny);
         }
-
-        setStatus('Camera running');
-      }catch(err){
-        console.error(err);
-        setStatus('Camera error: ' + err.message);
       }
-    });
+    }
 
-    stopCamBtn.addEventListener('click', ()=>{
+    function updateNegotiatedFpsUI(requested, actual){
+      reqFpsText.textContent = String(requested);
+      actFpsText.textContent = (actual === null || actual === undefined) ? '--' : String(actual);
+
+      const req = Number(requested);
+      const act = Number(actual);
+
+      if(!Number.isFinite(act)){
+        fpsNote.textContent = 'Actual FPS unknown (browser did not report frameRate).';
+        return;
+      }
+
+      if(act >= req){
+        fpsNote.textContent = `Great — negotiated at ${act} fps.`;
+      }else{
+        fpsNote.textContent =
+          `iOS Safari negotiated down to ${act} fps (requested ${req}). This is normal in browsers.`;
+      }
+    }
+
+    async function startCamera(){
+      setStatus('Starting camera...');
+
+      if(stream){
+        stream.getTracks().forEach(t=>t.stop());
+        stream = null;
+      }
+
+      const requested = Number(fpsRequest.value) || 120;
+      stream = await getCameraStreamRequestFPS(requested);
+
+      // iOS Safari: set attributes BEFORE play
+      video.muted = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.setAttribute('playsinline','');
+      video.setAttribute('muted','');
+      video.setAttribute('autoplay','');
+
+      video.srcObject = stream;
+
+      // wait metadata for correct sizing
+      await new Promise((resolve)=>{
+        if(video.readyState >= 1) return resolve();
+        video.onloadedmetadata = ()=>resolve();
+      });
+
+      resizeCanvasToVideo();
+
+      // must be user gesture: called from button click
+      await video.play();
+
+      // show negotiated FPS
+      const track = stream.getVideoTracks()[0];
+      const settings = track?.getSettings ? track.getSettings() : {};
+      const actualFps = settings?.frameRate ?? null;
+      updateNegotiatedFpsUI(requested, actualFps);
+
+      setStatus(`Camera running`);
+    }
+
+    async function stopCamera(){
       if(stream){
         stream.getTracks().forEach(t=>t.stop());
         stream = null;
       }
       setStatus('Camera stopped');
-      loopRunning = false;
-    });
+      actFpsText.textContent = '--';
+    }
 
-    // ---------- Recording (camera continues) ----------
+    // ---------- Recording ----------
     startRecBtn.addEventListener('click', ()=>{
-      if(!stream){
-        setStatus('Start camera first');
-        return;
-      }
+      if(!stream){ setStatus('Start camera first'); return; }
       recording = true;
       samples = [];
       sampleCount.textContent = '0';
@@ -339,46 +447,40 @@
       setStatus(`Recording stopped (${samples.length} samples)`);
     });
 
-    downloadBtn.addEventListener('click', ()=>{
-      downloadCSV();
-    });
-
-    // ---------- PNG snapshot export (video + overlay) ----------
+    // ---------- PNG snapshot ----------
     exportPNGBtn.addEventListener('click', ()=>{
       exportPNGSnapshot();
     });
 
     function exportPNGSnapshot(){
-      if(!video || video.readyState < 2){
+      if(video.readyState < 2){
         setStatus('PNG export: video not ready');
         return;
       }
       const w = video.videoWidth || overlay.width;
       const h = video.videoHeight || overlay.height;
-      if(!w || !h){
-        setStatus('PNG export: invalid dimensions');
-        return;
-      }
 
       const out = document.createElement('canvas');
       out.width = w;
       out.height = h;
       const octx = out.getContext('2d');
 
-      // draw camera frame
       octx.drawImage(video, 0, 0, w, h);
-      // draw overlay (skeleton + FBD + highlights)
       octx.drawImage(overlay, 0, 0, w, h);
 
-      const ts = new Date();
-      const stamp = ts.toISOString().replace(/[:.]/g,'-');
-      const filename = `JunWeiBiodynamicLab_snapshot_${stamp}.png`;
+      // tiny stamp
+      octx.font = '16px system-ui';
+      octx.fillStyle = 'rgba(15,23,42,0.55)';
+      octx.fillRect(8, 8, 380, 28);
+      octx.fillStyle = 'rgba(226,232,240,0.95)';
+      const stamp = new Date().toLocaleString();
+      octx.fillText(`Jun Wei Biodynamic Lab • ${stamp}`, 14, 28);
+
+      const iso = new Date().toISOString().replace(/[:.]/g,'-');
+      const filename = `JunWeiBiodynamicLab_snapshot_${iso}.png`;
 
       out.toBlob((blob)=>{
-        if(!blob){
-          setStatus('PNG export failed');
-          return;
-        }
+        if(!blob){ setStatus('PNG export failed'); return; }
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -413,7 +515,7 @@
       const lHip = lm[idx('leftHip')], rHip = lm[idx('rightHip')];
       if(!lSh||!rSh||!lHip||!rHip) return NaN;
       const midSh = {x:(lSh.x+rSh.x)/2, y:(lSh.y+rSh.y)/2};
-      const midHip = {x:(lHip.x+rHip.x)/2, y:(lHip.y+rHip.y)/2};
+      const midHip= {x:(lHip.x+rHip.x)/2, y:(lHip.y+rHip.y)/2};
       const vx = midSh.x-midHip.x, vy = midSh.y-midHip.y;
       const mag = Math.hypot(vx,vy);
       if(mag===0) return NaN;
@@ -431,6 +533,7 @@
       return {angle:rawAngle, angleSm, vel, accel, tau:NaN};
     }
 
+    // simplified arm inverse dynamics (shoulder+elbow torque)
     function inverseDynamicsArm(theta_sh_deg, theta_el_deg, dth_sh, dth_el, ddth_sh, ddth_el){
       const g = 9.80665;
       const ua = anthro.upperArmM, fa = anthro.forearmM;
@@ -459,7 +562,7 @@
       return {tau_shoulder:tau1, tau_elbow:tau2};
     }
 
-    // ---------- Drawing: skeleton + FBD on camera ----------
+    // ---------- Drawing: skeleton + FBD ----------
     const SEG = {
       torso: 'rgba(248,250,252,0.95)',
       L_arm: 'rgba(59,130,246,0.95)',
@@ -476,14 +579,12 @@
       ctx.lineTo(b.x,b.y);
       ctx.stroke();
     }
-
     function drawPoint(p,color='rgba(147,197,253,0.9)',r=3){
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(p.x,p.y,r,0,Math.PI*2);
       ctx.fill();
     }
-
     function drawArrow(x1,y1,x2,y2,label,color){
       ctx.strokeStyle = color;
       ctx.fillStyle = color;
@@ -505,7 +606,6 @@
         ctx.fillText(label, x2+4, y2-4);
       }
     }
-
     function drawTorqueArc(cx,cy,tau,color){
       if(!isFinite(tau)) return;
       const sign = tau >= 0 ? 1 : -1;
@@ -559,7 +659,7 @@
       const LK = lm[idx('leftKnee')],     RK = lm[idx('rightKnee')];
       const LA = lm[idx('leftAnkle')],    RA = lm[idx('rightAnkle')];
 
-      // Skeleton lines
+      // skeleton
       if(LS && RS) drawLine(LS, RS, SEG.torso, 5);
       if(LS && LH) drawLine(LS, LH, SEG.torso, 5);
       if(RS && RH) drawLine(RS, RH, SEG.torso, 5);
@@ -575,18 +675,15 @@
       if(RH && RK) drawLine(RH, RK, SEG.R_leg, 5);
       if(RK && RA) drawLine(RK, RA, SEG.R_leg, 5);
 
-      // points
       for(const p of [LS,RS,LE,RE,LW,RW,LH,RH,LK,RK,LA,RA]){
         if(p) drawPoint(p);
       }
 
-      // FBD on stickman
       const selected = new Set(selectedJoints());
       const showLabels = teachingMode.checked;
 
       function fbdAtJoint(jointKey, jointPoint, distalPoint, tauVal){
         if(!selected.has(jointKey) || !jointPoint || !distalPoint) return;
-
         const mgColor = 'rgba(248,250,252,0.95)';
         const rColor  = 'rgba(251,191,36,0.95)';
         const tauColor= 'rgba(244,63,94,0.95)';
@@ -603,10 +700,11 @@
       fbdAtJoint('R_Shoulder', RS, RE, results['R_Shoulder']?.tau);
       fbdAtJoint('L_Elbow', LE, LW, results['L_Elbow']?.tau);
       fbdAtJoint('R_Elbow', RE, RW, results['R_Elbow']?.tau);
+      // knees: τ not estimated (placeholder)
       fbdAtJoint('L_Knee', LK, LA, results['L_Knee']?.tau);
       fbdAtJoint('R_Knee', RK, RA, results['R_Knee']?.tau);
 
-      // Focus ring
+      // focus ring
       const fp = jointPointForKey(focusJoint, lm);
       if(fp){
         ctx.strokeStyle = 'rgba(37,99,235,0.95)';
@@ -642,10 +740,7 @@
       return 'high torque demand';
     }
     function updateInterpretation(key, r){
-      if(!r){
-        interpText.textContent = 'Waiting for pose...';
-        return;
-      }
+      if(!r){ interpText.textContent = 'Waiting for pose...'; return; }
       const a = isFinite(r.angleSm) ? r.angleSm : r.angle;
       const v = r.vel;
       const t = r.tau;
@@ -658,9 +753,9 @@ Vel   ≈ ${isFinite(v)?v.toFixed(1):'--'} °/s → ${speedDescriptor(v)}
 `;
       if(teachingMode.checked){
         if(/Knee|Hip|Ankle/.test(key)){
-          txt += `\nTeaching note: Lower-limb force arrows are illustrative unless you add GRF + full inverse dynamics.`;
+          txt += `\nTeaching note: Lower-limb force arrows are illustrative unless GRF + full inverse dynamics are added.`;
         } else if(/Shoulder|Elbow|Wrist/.test(key)){
-          txt += `\nTeaching note: τ shown for shoulder/elbow uses a simplified 2-link arm model.`;
+          txt += `\nTeaching note: τ for shoulder/elbow uses a simplified 2-link arm model.`;
         } else if(key === 'Torso'){
           txt += `\nTeaching note: Torso angle is a proxy for trunk lean vs vertical.`;
         }
@@ -668,32 +763,74 @@ Vel   ≈ ${isFinite(v)?v.toFixed(1):'--'} °/s → ${speedDescriptor(v)}
       interpText.textContent = txt;
     }
 
+    // ---------- CSV ----------
+    function downloadCSV(){
+      if(samples.length === 0){ setStatus('No samples to export'); return; }
+      const cols = Object.keys(samples[0]);
+      const rows = [cols.join(',')];
+      for(const s of samples){
+        rows.push(cols.map(k=>{
+          const v = s[k];
+          if(v === undefined || v === null) return '';
+          if(typeof v === 'number') return Number.isFinite(v) ? v.toFixed(6) : '';
+          return String(v).replace(/\r?\n/g,' ');
+        }).join(','));
+      }
+      const blob = new Blob([rows.join('\n')], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'JunWeiBiodynamicLab_joints.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus(`CSV downloaded (${samples.length} rows)`);
+    }
+    downloadBtn.addEventListener('click', downloadCSV);
+
+    // ---------- Status ----------
+    let statusTimer = null;
+    function setStatus(msg){
+      statusText.textContent = msg;
+      if(statusTimer) clearTimeout(statusTimer);
+      statusTimer = setTimeout(()=>{
+        statusText.textContent = (stream?'Camera running':'Idle') + (recording?' • Recording':'');
+      }, 1500);
+    }
+
     // ---------- Main loop ----------
     async function runLoop(){
       const step = async ()=>{
         if(!loopRunning) return;
-        if(!poseLandmarker || video.readyState < 2){
+
+        // loop fps
+        fpsFrames++;
+        const tNow = performance.now();
+        if(tNow - fpsLastT >= 500){
+          const fps = (fpsFrames * 1000) / (tNow - fpsLastT);
+          loopFpsText.textContent = fps.toFixed(1);
+          fpsFrames = 0;
+          fpsLastT = tNow;
+        }
+
+        if(video.readyState < 2){
           requestAnimationFrame(step);
           return;
         }
 
         const now = performance.now();
+
+        if(!poseLandmarker){
+          ctx.clearRect(0,0,overlay.width,overlay.height);
+          interpText.textContent = 'Pose model not ready. Check internet/CDN.';
+          requestAnimationFrame(step);
+          return;
+        }
+
         const det = await poseLandmarker.detectForVideo(video, now);
         const pose = (det?.landmarks?.length) ? det.landmarks[0] : null;
 
-        fpsFrames++;
-        const tNow = performance.now();
-        if(tNow - fpsLastT >= 500){
-          const fps = (fpsFrames * 1000) / (tNow - fpsLastT);
-          fpsText.textContent = fps.toFixed(1);
-          fpsFrames = 0;
-          fpsLastT = tNow;
-        }
-
-        if(pose){
-          frameCounter++;
-          processPose(pose, now);
-        }else{
+        if(pose) processPose(pose, now);
+        else{
           ctx.clearRect(0,0,overlay.width,overlay.height);
           interpText.textContent = 'Pose not detected (step back / improve lighting).';
         }
@@ -706,7 +843,6 @@ Vel   ≈ ${isFinite(v)?v.toFixed(1):'--'} °/s → ${speedDescriptor(v)}
     function processPose(landmarks, now){
       const w = video.videoWidth || overlay.width;
       const h = video.videoHeight || overlay.height;
-
       const lm = landmarks.map(p=>({x:p.x*w, y:p.y*h, z:p.z}));
 
       const dtRaw = (now - (lastTime||now))/1000;
@@ -745,6 +881,7 @@ Vel   ≈ ${isFinite(v)?v.toFixed(1):'--'} °/s → ${speedDescriptor(v)}
       if(LK && LA && LFI) results['L_Ankle'] = updateJoint('L_Ankle', angleBetween3D(LK, LA, LFI), now, dt);
       if(RK && RA && RFI) results['R_Ankle'] = updateJoint('R_Ankle', angleBetween3D(RK, RA, RFI), now, dt);
 
+      // arm torques
       if(results['L_Shoulder'] && results['L_Elbow']){
         const sh = results['L_Shoulder'], el = results['L_Elbow'];
         const inv = inverseDynamicsArm(sh.angleSm, el.angleSm, sh.vel, el.vel, sh.accel, el.accel);
@@ -777,11 +914,9 @@ Vel   ≈ ${isFinite(v)?v.toFixed(1):'--'} °/s → ${speedDescriptor(v)}
         kinBody.appendChild(tr);
       }
 
-      const selectedSet = new Set(selected);
-      if(!selectedSet.has(focusJoint)){
+      if(!new Set(selected).has(focusJoint)){
         focusJoint = selected[0] || 'Torso';
       }
-
       updateInterpretation(focusJoint, results[focusJoint]);
 
       if(recording){
@@ -797,64 +932,52 @@ Vel   ≈ ${isFinite(v)?v.toFixed(1):'--'} °/s → ${speedDescriptor(v)}
       }
     }
 
+    // focus joint by tap
     kinBody.addEventListener('click', (e)=>{
       const tr = e.target.closest('tr');
       if(!tr) return;
-      const j = tr.dataset.joint;
-      if(j) focusJoint = j;
+      focusJoint = tr.dataset.joint || focusJoint;
     });
 
-    // ---------- CSV download ----------
-    function downloadCSV(){
-      if(samples.length === 0){
-        setStatus('No samples to export');
-        return;
+    // ---------- Wire camera buttons ----------
+    startCamBtn.addEventListener('click', async ()=>{
+      try{
+        await startCamera();
+        if(!loopRunning){
+          loopRunning = true;
+          lastTime = performance.now();
+          runLoop();
+        }
+      }catch(err){
+        console.error(err);
+        // show real iOS error if it fails
+        alert(`${err.name}: ${err.message}`);
+        setStatus(`Camera error: ${err.name}`);
       }
-      const cols = Object.keys(samples[0]);
-      const rows = [cols.join(',')];
-      for(const s of samples){
-        rows.push(cols.map(k=>{
-          const v = s[k];
-          if(v === undefined || v === null) return '';
-          if(typeof v === 'number') return Number.isFinite(v) ? v.toFixed(6) : '';
-          return String(v).replace(/\r?\n/g,' ');
-        }).join(','));
-      }
-      const blob = new Blob([rows.join('\n')], {type:'text/csv'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'JunWeiBiodynamicLab_joints.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatus(`CSV downloaded (${samples.length} rows)`);
-    }
+    });
 
-    // ---------- Status ----------
-    let statusTimer = null;
-    function setStatus(msg){
-      statusText.textContent = msg;
-      if(statusTimer) clearTimeout(statusTimer);
-      statusTimer = setTimeout(()=>{
-        statusText.textContent = (stream?'Camera running':'Idle') + (recording?' • Recording':'');
-      }, 1500);
-    }
+    stopCamBtn.addEventListener('click', async ()=>{
+      loopRunning = false;
+      await stopCamera();
+    });
 
     // ---------- Cleanup ----------
     window.addEventListener('beforeunload', ()=>{
       try{
-        if(stream && stream.getTracks){
-          stream.getTracks().forEach(t=>t.stop());
-        }
-        if(poseLandmarker){
-          poseLandmarker.close();
-        }
+        if(stream?.getTracks) stream.getTracks().forEach(t=>t.stop());
+        if(poseLandmarker?.close) poseLandmarker.close();
       }catch(_){}
     });
 
     window.addEventListener('resize', ()=>{
-      if(video && video.videoWidth) resizeCanvasToVideo();
+      if(video?.videoWidth) resizeCanvasToVideo();
     });
+
+    // Update requested FPS label immediately
+    fpsRequest.addEventListener('change', ()=>{
+      reqFpsText.textContent = fpsRequest.value;
+    });
+
   </script>
 </body>
 </html>
