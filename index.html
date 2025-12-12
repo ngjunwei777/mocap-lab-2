@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Web Motion Capture — BlazePose + Inverse Dynamics</title>
+  <title>Junwei Biodynamic Lab</title>
   <style>
     body{font-family:system-ui,Segoe UI,Roboto,Arial;background:#0f172a;color:#e6eef8;margin:0}
     .app{display:grid;grid-template-columns:380px 1fr;gap:12px;padding:12px}
@@ -25,7 +25,7 @@
 <body>
   <div class="app">
     <div class="panel" style="height:calc(100vh - 32px);overflow:auto">
-      <h2>Motion capture UI</h2>
+      <h2>Junwei Biodynamic Lab — Motion Capture UI</h2>
       <div class="controls">
         <label class="small">Camera</label>
         <button id="startCam">Start camera (back camera preferred)</button>
@@ -37,7 +37,14 @@
       </div>
 
       <h3>Joint kinematics (live)</h3>
-      <table id="kinTable"><thead><tr><th>Joint</th><th>Angle (°)</th><th>Smoothed (°)</th><th>Velocity (°/s)</th><th>Torque (Nm)</th></tr></thead><tbody></tbody></table>
+      <table id="kinTable">
+        <thead>
+          <tr>
+            <th>Joint</th><th>Angle (°)</th><th>Smoothed (°)</th><th>Velocity (°/s)</th><th>Torque (Nm)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
 
       <h3>Anthropometrics</h3>
       <label class="small">Subject mass (kg)</label>
@@ -50,7 +57,10 @@
       <input id="upperArmM" type="number" step="0.1" value="1.5" />
       <label class="small">Forearm mass (kg)</label>
       <input id="forearmM" type="number" step="0.1" value="1.0" />
-      <div class="row"><button id="applyAnthro">Apply anthropometrics</button><button id="resetAnthro">Reset defaults</button></div>
+      <div class="row">
+        <button id="applyAnthro">Apply anthropometrics</button>
+        <button id="resetAnthro">Reset defaults</button>
+      </div>
 
       <h3>Smoothing</h3>
       <label class="small">One-Euro filter: minCutoff</label>
@@ -69,13 +79,15 @@
       <label class="small">Buffer length (samples)</label>
       <input id="bufferLen" type="number" value="200" />
 
-      <p class="muted">Notes: This demo uses MediaPipe BlazePose (client-side) and simplified inverse dynamics for educational/demo purposes only.</p>
+      <p class="muted">
+        Notes: This demo uses MediaPipe BlazePose (client-side) and simplified inverse dynamics for educational/demo purposes only.
+      </p>
     </div>
 
     <div class="panel" id="videoPanel">
       <div id="videoWrap">
         <video id="video" playsinline></video>
-        <canvas id="overlay" ></canvas>
+        <canvas id="overlay"></canvas>
       </div>
 
       <div class="chartWrap">
@@ -105,7 +117,7 @@
     const stopCam = document.getElementById('stopCam');
     const startRec = document.getElementById('startRec');
     const stopRec = document.getElementById('stopRec');
-    const downloadCSV = document.getElementById('downloadCSV');
+    const downloadCSVBtn = document.getElementById('downloadCSV');
     const kinTable = document.querySelector('#kinTable tbody');
 
     const subjectMassInput = document.getElementById('subjectMass');
@@ -144,7 +156,7 @@
       anthro.forearmI = (anthro.forearmM * Math.pow(anthro.forearmL,2)) * 0.04;
       console.log('Anthro applied', anthro);
     }
-    function resetAnthro(){
+    function resetAnthroFn(){
       subjectMassInput.value = anthro.subjectMass = 70;
       upperArmLInput.value = anthro.upperArmL = 0.30;
       forearmLInput.value = anthro.forearmL = 0.25;
@@ -153,8 +165,8 @@
       applyAnthroFromUI();
     }
     applyAnthro.addEventListener('click', applyAnthroFromUI);
-    resetAnthro.addEventListener('click', resetAnthro);
-    resetAnthro();
+    resetAnthro.addEventListener('click', resetAnthroFn);
+    resetAnthroFn();
 
     // One Euro Filter implementation (for smoothing angles/landmarks)
     class OneEuroFilter {
@@ -187,16 +199,27 @@
     // charts
     const angleCtx = document.getElementById('angleChart').getContext('2d');
     const torqueCtx = document.getElementById('torqueChart').getContext('2d');
-    const angleChart = new Chart(angleCtx, { type:'line', data:{labels:[], datasets:[{label:'Angle (deg)', data:[], tension:0.2, fill:true}]}, options:{animation:false, maintainAspectRatio:false, scales:{x:{display:false}}} });
-    const torqueChart = new Chart(torqueCtx, { type:'line', data:{labels:[], datasets:[{label:'Torque (Nm)', data:[], tension:0.2, fill:true}]}, options:{animation:false, maintainAspectRatio:false, scales:{x:{display:false}}} });
+    const angleChart = new Chart(angleCtx, {
+      type:'line',
+      data:{labels:[], datasets:[{label:'Angle (deg)', data:[], tension:0.2, fill:true}]},
+      options:{animation:false, maintainAspectRatio:false, scales:{x:{display:false}}}
+    });
+    const torqueChart = new Chart(torqueCtx, {
+      type:'line',
+      data:{labels:[], datasets:[{label:'Torque (Nm)', data:[], tension:0.2, fill:true}]},
+      options:{animation:false, maintainAspectRatio:false, scales:{x:{display:false}}}
+    });
 
     const angleBuffer = [], torqueBuffer = [], timeBuffer = [];
     function pushToBuffer(buf,val){ buf.push(Number.isFinite(val)?Number(val.toFixed(4)):NaN); }
-    function trimBuffers(len){ while(angleBuffer.length>len) angleBuffer.shift(); while(torqueBuffer.length>len) torqueBuffer.shift(); while(timeBuffer.length>len) timeBuffer.shift(); }
+    function trimBuffers(len){
+      while(angleBuffer.length>len) angleBuffer.shift();
+      while(torqueBuffer.length>len) torqueBuffer.shift();
+      while(timeBuffer.length>len) timeBuffer.shift();
+    }
 
     // utility: 3D angle between vectors (deg)
     function angleBetween3D(a,b,c){
-      // vectors ba and bc
       const v1 = {x:a.x-b.x, y:a.y-b.y, z:(a.z||0)-(b.z||0)};
       const v2 = {x:c.x-b.x, y:c.y-b.y, z:(c.z||0)-(b.z||0)};
       const dot = v1.x*v2.x + v1.y*v2.y + v1.z*v2.z;
@@ -208,51 +231,51 @@
     }
 
     // inverse dynamics (very simplified 2D planar chain per arm using landmarks projected)
-    function inverseDynamicsArm(theta_shoulder_deg, theta_elbow_deg, theta_shoulder_vel, theta_elbow_vel, theta_shoulder_acc, theta_elbow_acc, side='L'){
-      // Using simple two-link Newton-Euler in sagittal plane
+    function inverseDynamicsArm(theta_shoulder_deg, theta_elbow_deg, theta_shoulder_vel, theta_elbow_vel, theta_shoulder_acc, theta_elbow_acc){
       const g = 9.80665;
       const ua = anthro.upperArmM; const fa = anthro.forearmM;
       const la = anthro.upperArmL; const lf = anthro.forearmL;
       const ra = anthro.upperArmCOM; const rf = anthro.forearmCOM;
       const Ia = anthro.upperArmI; const If = anthro.forearmI;
-      // convert to radians
       const th1 = theta_shoulder_deg*Math.PI/180; const th2 = theta_elbow_deg*Math.PI/180;
       const dth1 = theta_shoulder_vel*Math.PI/180; const dth2 = theta_elbow_vel*Math.PI/180;
       const ddth1 = theta_shoulder_acc*Math.PI/180; const ddth2 = theta_elbow_acc*Math.PI/180;
-      // equations from simple planar two-link manipulator (see robotics literature)
-      // Mass matrix elements
+
       const m11 = Ia + If + ua*ra*ra + fa*(la*la + rf*rf + 2*la*rf*Math.cos(th2));
       const m12 = If + fa*(rf*rf + la*rf*Math.cos(th2));
       const m21 = m12;
       const m22 = If + fa*rf*rf;
-      // Coriolis/centrifugal
       const h = -fa*la*rf*Math.sin(th2);
       const c1 = h*(2*dth1*dth2 + dth2*dth2);
       const c2 = h*dth1*dth1;
-      // gravity
       const g1 = ua*g*ra*Math.cos(th1) + fa*g*(la*Math.cos(th1) + rf*Math.cos(th1+th2));
       const g2 = fa*g*rf*Math.cos(th1+th2);
-      // torques
       const tau1 = m11*ddth1 + m12*ddth2 + c1 + g1;
       const tau2 = m21*ddth1 + m22*ddth2 + c2 + g2;
       return {tau_shoulder:tau1, tau_elbow:tau2};
     }
 
-    // Back-camera preferring iPhone: use facingMode: {exact:'environment'} with fallback
+    // Back-camera preferring, with fallbacks
     async function getBackCameraStream(){
-      const constraintsPreferred = { video: { facingMode: { exact: 'environment' }, width: {ideal:1280}, height: {ideal:720} }, audio:false };
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        throw new Error('Camera API not supported in this browser.');
+      }
+      const constraintsPreferred = {
+        video: { facingMode: { exact: 'environment' }, width: {ideal:1280}, height: {ideal:720} },
+        audio:false
+      };
       try{
         return await navigator.mediaDevices.getUserMedia(constraintsPreferred);
       }catch(e){
-        // fallback: allow camera selection by deviceId - pick any 'back' label if available
         const devices = await navigator.mediaDevices.enumerateDevices();
         const cams = devices.filter(d=>d.kind==='videoinput');
-        // try to find camera with 'back' or 'rear' in label
         const preferred = cams.find(c=>/back|rear|environment|facing back/i.test(c.label));
         if(preferred){
-          return await navigator.mediaDevices.getUserMedia({video:{deviceId:preferred.deviceId, width:{ideal:1280}, height:{ideal:720}}, audio:false});
+          return await navigator.mediaDevices.getUserMedia({
+            video:{deviceId:{exact:preferred.deviceId}, width:{ideal:1280}, height:{ideal:720}},
+            audio:false
+          });
         }
-        // final fallback
         return await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}, audio:false});
       }
     }
@@ -289,24 +312,46 @@
     startCam.addEventListener('click', async ()=>{
       try{
         stream = await getBackCameraStream();
-        video.srcObject = stream; await video.play();
-        overlay.width = video.videoWidth; overlay.height = video.videoHeight;
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          overlay.width = video.videoWidth;
+          overlay.height = video.videoHeight;
+        };
+        await video.play();
         lastTime = performance.now();
         runLoop();
-      }catch(err){ alert('Camera error: '+err.message); }
+      }catch(err){
+        alert('Camera error: '+err.message);
+        console.error(err);
+      }
     });
-    stopCam.addEventListener('click', ()=>{ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } });
+
+    stopCam.addEventListener('click', ()=>{
+      if(stream){
+        stream.getTracks().forEach(t=>t.stop());
+        stream = null;
+      }
+    });
 
     // Recording
-    startRec.addEventListener('click', ()=>{ recording=true; samples=[]; lastAngles={}; alert('Recording started'); });
-    stopRec.addEventListener('click', ()=>{ recording=false; alert('Recording stopped: '+samples.length+' samples'); });
-    downloadCSV.addEventListener('click', downloadCSV);
+    startRec.addEventListener('click', ()=>{
+      recording=true; samples=[]; lastAngles={};
+      alert('Recording started');
+    });
+    stopRec.addEventListener('click', ()=>{
+      recording=false;
+      alert('Recording stopped: '+samples.length+' samples');
+    });
+    downloadCSVBtn.addEventListener('click', handleDownloadCSV);
 
     // Main loop - use detectForVideo with timestamp
     async function runLoop(){
       const sampleMs = 33; // ~30Hz
       async function step(){
-        if(!poseLandmarker || !video || video.readyState < 2){ requestAnimationFrame(step); return; }
+        if(!poseLandmarker || !video || video.readyState < 2){
+          requestAnimationFrame(step);
+          return;
+        }
         const now = performance.now();
         const detection = await poseLandmarker.detectForVideo(video, now);
         const pose = (detection && detection.landmarks && detection.landmarks.length>0) ? detection.landmarks[0] : null;
@@ -317,41 +362,54 @@
     }
 
     function processPose(landmarks, now){
-      // landmarks: array of {x,y,z,visibility?} normalized [0,1], origin top-left
-      // convert to pixel coords for drawing
-      const lm = landmarks.map(p=>({x:p.x*video.videoWidth, y:p.y*video.videoHeight, z:p.z, score:(p.hasOwnProperty('presence')?p.presence:1)}));
+      const lm = landmarks.map(p=>({
+        x:p.x*video.videoWidth,
+        y:p.y*video.videoHeight,
+        z:p.z,
+        score:(p.hasOwnProperty('presence')?p.presence:1)
+      }));
       drawLandmarks(lm);
-      // compute angles for joints: elbow = shoulder-elbow-wrist ; knee = hip-knee-ankle
-      const triples = [ ['leftShoulder','leftElbow','leftWrist'], ['rightShoulder','rightElbow','rightWrist'], ['leftHip','leftKnee','leftAnkle'], ['rightHip','rightKnee','rightAnkle'] ];
+
+      const triples = [
+        ['leftShoulder','leftElbow','leftWrist'],
+        ['rightShoulder','rightElbow','rightWrist'],
+        ['leftHip','leftKnee','leftAnkle'],
+        ['rightHip','rightKnee','rightAnkle']
+      ];
       const labels = ['leftElbow','rightElbow','leftKnee','rightKnee'];
       const results = {};
-      const dt = (now - (lastTime||now))/1000; lastTime = now;
+      const dt = (now - (lastTime||now))/1000;
+      lastTime = now;
+
       for(let i=0;i<triples.length;i++){
         const [aN,bN,cN] = triples[i];
-        const a = lm[kpNames.indexOf(aN)]; const b = lm[kpNames.indexOf(bN)]; const c = lm[kpNames.indexOf(cN)];
+        const a = lm[kpNames.indexOf(aN)];
+        const b = lm[kpNames.indexOf(bN)];
+        const c = lm[kpNames.indexOf(cN)];
         const angle = angleBetween3D(a,b,c);
-        // smoothing with OneEuro
         const f = getFilter(labels[i]);
         const angleSm = f.filter(angle, now);
         const prev = lastAngles[labels[i]] || {angle:angle, vel:0};
         const vel = isFinite(angleSm) && isFinite(prev.angle) ? (angleSm - prev.angle)/dt : 0;
         const accel = isFinite(vel) && isFinite(prev.vel) ? (vel - prev.vel)/dt : 0;
         lastAngles[labels[i]] = {angle:angleSm, vel};
-        // inverse dynamics for elbows (two-link arm) — shoulder & elbow torques
+
         let tau_sh=NaN, tau_el=NaN;
         if(i===0 || i===1){
-          // need shoulder angle estimate — approximate using hip-shoulder-elbow as proxy for shoulder plane
           const shoulder = lm[kpNames.indexOf((i===0)?'leftShoulder':'rightShoulder')];
           const hip = lm[kpNames.indexOf((i===0)?'leftHip':'rightHip')];
-          const shAngle = angleBetween3D(hip, shoulder, b); // approximate shoulder flexion
-          const shPrev = lastAngles[(i===0)?'leftShoulder':'rightShoulder'] || {angle:shAngle, vel:0};
-          const shSm = getFilter((i===0)?'leftShoulder':'rightShoulder').filter(shAngle, now);
-          const shVel = (shSm - shPrev.angle)/dt; const shAccel = (shVel - shPrev.vel)/dt;
-          lastAngles[(i===0)?'leftShoulder':'rightShoulder'] = {angle:shSm, vel:shVel};
-          const inv = inverseDynamicsArm(shSm, angleSm, shVel, vel, shAccel, accel, i===0?'L':'R');
-          tau_sh = inv.tau_shoulder; tau_el = inv.tau_elbow;
+          const shAngle = angleBetween3D(hip, shoulder, b);
+          const shoulderKey = (i===0)?'leftShoulder':'rightShoulder';
+          const shPrev = lastAngles[shoulderKey] || {angle:shAngle, vel:0};
+          const shSm = getFilter(shoulderKey).filter(shAngle, now);
+          const shVel = (shSm - shPrev.angle)/dt;
+          const shAccel = (shVel - shPrev.vel)/dt;
+          lastAngles[shoulderKey] = {angle:shSm, vel:shVel};
+          const inv = inverseDynamicsArm(shSm, angleSm, shVel, vel, shAccel, accel);
+          tau_sh = inv.tau_shoulder;
+          tau_el = inv.tau_elbow;
         }
-        results[labels[i]] = {angle:angle, angleSm, vel, accel, tau_sh, tau_el};
+        results[labels[i]] = {angle, angleSm, vel, accel, tau_sh, tau_el};
       }
 
       // update UI table
@@ -359,29 +417,46 @@
       for(const key of Object.keys(results)){
         const r = results[key];
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${key}</td><td>${isFinite(r.angle)?r.angle.toFixed(1):'--'}</td><td>${isFinite(r.angleSm)?r.angleSm.toFixed(1):'--'}</td><td>${isFinite(r.vel)?r.vel.toFixed(1):'--'}</td><td>${isFinite(r.tau_el)?r.tau_el.toFixed(2):'--'}</td>`;
+        tr.innerHTML = `
+          <td>${key}</td>
+          <td>${isFinite(r.angle)?r.angle.toFixed(1):'--'}</td>
+          <td>${isFinite(r.angleSm)?r.angleSm.toFixed(1):'--'}</td>
+          <td>${isFinite(r.vel)?r.vel.toFixed(1):'--'}</td>
+          <td>${isFinite(r.tau_el)?r.tau_el.toFixed(2):'--'}</td>
+        `;
         kinTable.appendChild(tr);
       }
 
-      // charts plotting selected joint
-      const jointToPlot = plotJointSelect.value; const bufLen = Number(bufferLenInput.value) || 200;
+      const jointToPlot = plotJointSelect.value;
+      const bufLen = Number(bufferLenInput.value) || 200;
       const resPlot = results[jointToPlot] || Object.values(results)[0];
       const timeLabel = new Date().toLocaleTimeString();
       pushToBuffer(angleBuffer, resPlot.angleSm);
       pushToBuffer(torqueBuffer, resPlot.tau_el);
       pushToBuffer(timeBuffer, timeLabel);
       trimBuffers(bufLen);
-      angleChart.data.labels = timeBuffer.slice(); angleChart.data.datasets[0].data = angleBuffer.slice(); angleChart.update('none');
-      torqueChart.data.labels = timeBuffer.slice(); torqueChart.data.datasets[0].data = torqueBuffer.slice(); torqueChart.update('none');
+      angleChart.data.labels = timeBuffer.slice();
+      angleChart.data.datasets[0].data = angleBuffer.slice();
+      angleChart.update('none');
+      torqueChart.data.labels = timeBuffer.slice();
+      torqueChart.data.datasets[0].data = torqueBuffer.slice();
+      torqueChart.update('none');
 
-      // store raw sample when recording
       if(recording){
         const sample = {time:new Date().toISOString()};
-        // landmarks
-        for(let i=0;i<kpNames.length;i++){ const p=landmarks[i]; sample[`${kpNames[i]}_x`]=p.x; sample[`${kpNames[i]}_y`]=p.y; sample[`${kpNames[i]}_z`]=p.z; }
-        // angles/torques
+        for(let i=0;i<kpNames.length;i++){
+          const p=landmarks[i];
+          sample[`${kpNames[i]}_x`]=p.x;
+          sample[`${kpNames[i]}_y`]=p.y;
+          sample[`${kpNames[i]}_z`]=p.z;
+        }
         for(const k of Object.keys(results)){
-          const rr = results[k]; sample[`${k}_angle`]=rr.angle; sample[`${k}_angleSm`]=rr.angleSm; sample[`${k}_vel`]=rr.vel; sample[`${k}_tau_el`]=rr.tau_el; sample[`${k}_tau_sh`]=rr.tau_sh;
+          const rr = results[k];
+          sample[`${k}_angle`]=rr.angle;
+          sample[`${k}_angleSm`]=rr.angleSm;
+          sample[`${k}_vel`]=rr.vel;
+          sample[`${k}_tau_el`]=rr.tau_el;
+          sample[`${k}_tau_sh`]=rr.tau_sh;
         }
         samples.push(sample);
       }
@@ -389,27 +464,54 @@
 
     function drawLandmarks(lm){
       ctx.clearRect(0,0,overlay.width,overlay.height);
-      // draw connections (simple)
-      ctx.lineWidth=2; ctx.strokeStyle='rgba(50,255,150,0.9)';
+      ctx.lineWidth=2;
+      ctx.strokeStyle='rgba(50,255,150,0.9)';
       const pairs = [ [11,13],[13,15],[12,14],[14,16],[11,12],[23,24],[11,23],[12,24] ];
       for(const [i,j] of pairs){
         const a=lm[i], b=lm[j];
-        if(a && b){ ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+        if(a && b){
+          ctx.beginPath();
+          ctx.moveTo(a.x,a.y);
+          ctx.lineTo(b.x,b.y);
+          ctx.stroke();
+        }
       }
-      for(const p of lm){ ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fillStyle='aqua'; ctx.fill(); }
+      for(const p of lm){
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,3,0,Math.PI*2);
+        ctx.fillStyle='aqua';
+        ctx.fill();
+      }
     }
 
-    function downloadCSV(){
-      if(samples.length===0){ alert('No samples recorded'); return; }
+    function handleDownloadCSV(){
+      if(samples.length===0){
+        alert('No samples recorded');
+        return;
+      }
       const keys = Object.keys(samples[0]);
       const rows = [keys.join(',')];
-      for(const s of samples){ rows.push(keys.map(k=> (s[k]===undefined?'':String(s[k]).replace(/\r?\n/g,' ')) ).join(',')); }
+      for(const s of samples){
+        rows.push(keys.map(k => (s[k]===undefined?'':String(s[k]).replace(/\r?\n/g,' '))).join(','));
+      }
       const blob = new Blob([rows.join('\n')], {type:'text/csv'});
-      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='mocap_full.csv'; a.click(); URL.revokeObjectURL(url);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'mocap_full.csv';
+      a.click();
+      URL.revokeObjectURL(url);
     }
 
     // cleanup
-    window.addEventListener('beforeunload', ()=>{ if(stream) stream.getTracks) && stream.getTracks().forEach(t=>t.stop()); if(poseLandmarker) poseLandmarker.close(); });
+    window.addEventListener('beforeunload', ()=>{
+      if(stream && stream.getTracks){
+        stream.getTracks().forEach(t=>t.stop());
+      }
+      if(poseLandmarker){
+        poseLandmarker.close();
+      }
+    });
   </script>
 </body>
 </html>
